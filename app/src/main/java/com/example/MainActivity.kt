@@ -109,8 +109,7 @@ fun FocusNetApp(
     val connectionType by viewModel.connectionType.collectAsState()
     val currentAppName by viewModel.currentForegroundAppName.collectAsState()
     val currentPackageName by viewModel.currentForegroundPackage.collectAsState()
-    val gracePackage by viewModel.gracePackage.collectAsState()
-    val graceRemainingSeconds by viewModel.graceRemainingSeconds.collectAsState()
+    val activeGracePasses by viewModel.activeGracePasses.collectAsState()
     val temporaryPasses by viewModel.temporaryPasses.collectAsState()
     val isAccessibilityEnabled by viewModel.isAccessibilityPermissionGranted.collectAsState()
     val isVpnPrepared by viewModel.isVpnPermissionGranted.collectAsState()
@@ -182,9 +181,9 @@ fun FocusNetApp(
                     currentAppName = currentAppName,
                     currentPackageName = currentPackageName,
                     connectionType = connectionType,
-                    gracePackage = gracePackage,
-                    graceRemainingSeconds = graceRemainingSeconds,
+                    activeGracePasses = activeGracePasses,
                     temporaryPasses = temporaryPasses,
+                    onGetAppName = { viewModel.getAppName(it) },
                     isAccessibilityEnabled = isAccessibilityEnabled,
                     isVpnPrepared = isVpnPrepared,
                     blockedCount = blockedCount,

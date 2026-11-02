@@ -33,8 +33,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val currentForegroundPackage: StateFlow<String?> = TrafficDirectorManager.currentForegroundPackage
     val currentForegroundAppName: StateFlow<String> = TrafficDirectorManager.currentForegroundAppName
-    val gracePackage: StateFlow<String?> = TrafficDirectorManager.gracePackage
-    val graceRemainingSeconds: StateFlow<Int> = TrafficDirectorManager.graceRemainingSeconds
+    val activeGracePasses: StateFlow<Map<String, Long>> = TrafficDirectorManager.activeGracePasses
     val temporaryPasses: StateFlow<Map<String, Long>> = repository.temporaryPasses
     val isVpnActive: StateFlow<Boolean> = TrafficDirectorManager.isVpnActive
     val isAccessibilityConnected: StateFlow<Boolean> = TrafficDirectorManager.isAccessibilityConnected

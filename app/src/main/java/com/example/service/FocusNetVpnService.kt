@@ -69,7 +69,7 @@ class FocusNetVpnService : VpnService() {
         val activeAppName = TrafficDirectorManager.currentForegroundAppName.value
         val notification = buildNotification(activeAppName)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
                 NOTIFICATION_ID,
                 notification,
@@ -135,8 +135,8 @@ class FocusNetVpnService : VpnService() {
         val activePkg = TrafficDirectorManager.currentForegroundPackage.value ?: packageName
         val activeAppName = TrafficDirectorManager.currentForegroundAppName.value
         val whitelist = repo.whitelistedPackages.value
-        val gracePkg = TrafficDirectorManager.gracePackage.value
         val now = System.currentTimeMillis()
+        val activeGrace = TrafficDirectorManager.activeGracePasses.value.filter { it.value > now }.keys
         val tempPasses = repo.temporaryPasses.value.entries.filter { it.value > now }.map { it.key }
 
         try {
@@ -155,9 +155,7 @@ class FocusNetVpnService : VpnService() {
             val allowedDirectPackages = mutableSetOf<String>()
             allowedDirectPackages.add(activePkg)
             allowedDirectPackages.addAll(whitelist)
-            if (gracePkg != null) {
-                allowedDirectPackages.add(gracePkg)
-            }
+            allowedDirectPackages.addAll(activeGrace)
             allowedDirectPackages.addAll(tempPasses)
             allowedDirectPackages.add(packageName) // FocusNet self
 
@@ -188,8 +186,14 @@ class FocusNetVpnService : VpnService() {
             }
 
             val statusDetail = when {
-                gracePkg != null -> "Liberado para $activeAppName (Carência ativa para ${repo.getAppName(gracePkg)})."
-                tempPasses.isNotEmpty() -> "Liberado para $activeAppName (+${tempPasses.size} passes temporários)."
+                activeGrace.isNotEmpty() -> {
+                    val graceNames = activeGrace.map { repo.getAppName(it) }.joinToString(", ")
+                    "Liberado para $activeAppName (Carência: $graceNames)."
+                }
+                tempPasses.isNotEmpty() -> {
+                    val tempNames = tempPasses.map { repo.getAppName(it) }.joinToString(", ")
+                    "Liberado para $activeAppName (+ passes: $tempNames)."
+                }
                 else -> "Liberado para $activeAppName. Background bloqueado (IPv4 + IPv6)."
             }
             updateNotificationText(statusDetail)

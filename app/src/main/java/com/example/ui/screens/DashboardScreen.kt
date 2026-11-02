@@ -80,8 +80,7 @@ fun DashboardScreen(
     currentAppName: String,
     currentPackageName: String?,
     connectionType: com.example.service.ConnectionType = com.example.service.ConnectionType.WIFI,
-    gracePackage: String? = null,
-    graceRemainingSeconds: Int = 0,
+    activeGracePasses: Map<String, Long> = emptyMap(),
     temporaryPasses: Map<String, Long> = emptyMap(),
     isAccessibilityEnabled: Boolean,
     isVpnPrepared: Boolean,
@@ -93,6 +92,7 @@ fun DashboardScreen(
     onToggleWifiFilter: (Boolean) -> Unit,
     onUpdateGracePeriodSeconds: (Int) -> Unit = {},
     onRevokeTemporaryPass: (String) -> Unit = {},
+    onGetAppName: (String) -> String = { it.substringAfterLast('.') },
     onRequestVpnPermission: () -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
     onSimulateAppSwitch: (String) -> Unit,
@@ -129,8 +129,10 @@ fun DashboardScreen(
             )
         }
 
-        // Active Grace Period Countdown Banner
-        if (gracePackage != null && graceRemainingSeconds > 0) {
+        // Active Grace Period Countdown Banner (Multi-App Support)
+        val now = System.currentTimeMillis()
+        val currentGrace = activeGracePasses.filter { it.value > now }
+        if (currentGrace.isNotEmpty()) {
             item {
                 Card(
                     modifier = Modifier
@@ -140,59 +142,82 @@ fun DashboardScreen(
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF2E2211)),
                     border = androidx.compose.foundation.BorderStroke(1.dp, AmberAlert)
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(16.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .background(AmberAlert.copy(alpha = 0.2f), CircleShape)
-                                .border(1.dp, AmberAlert.copy(alpha = 0.7f), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.HourglassTop,
-                                contentDescription = null,
-                                tint = AmberAlert,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(14.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .background(AmberAlert.copy(alpha = 0.2f), CircleShape)
+                                    .border(1.dp, AmberAlert.copy(alpha = 0.7f), CircleShape),
+                                contentAlignment = Alignment.Center
                             ) {
+                                Icon(
+                                    imageVector = Icons.Default.HourglassTop,
+                                    contentDescription = null,
+                                    tint = AmberAlert,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Carência Ativa: ${graceRemainingSeconds}s",
+                                    text = if (currentGrace.size == 1) "Carência Ativa" else "Carências Ativas (${currentGrace.size} apps)",
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = AmberAlert
                                 )
+                                Text(
+                                    text = "Concluindo envios e downloads em segundo plano",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        currentGrace.forEach { (pkg, expiry) ->
+                            val remainingSecs = ((expiry - now) / 1000L).coerceAtLeast(1)
+                            val friendlyName = onGetAppName(pkg)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = friendlyName,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = TextPrimary
+                                    )
+                                    Text(
+                                        text = "Tempo restante para concluir tráfego",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextMuted,
+                                        fontSize = 10.sp
+                                    )
+                                }
                                 Box(
                                     modifier = Modifier
                                         .background(AmberAlert, RoundedCornerShape(12.dp))
-                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                        .padding(horizontal = 10.dp, vertical = 3.dp)
                                 ) {
                                     Text(
-                                        text = "${graceRemainingSeconds}s",
+                                        text = "${remainingSecs}s",
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.Black
                                     )
                                 }
                             }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "App anterior ($gracePackage) tem mais $graceRemainingSeconds segundos de internet para concluir envios/downloads.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary,
-                                lineHeight = 16.sp
-                            )
                         }
                     }
                 }
@@ -201,7 +226,6 @@ fun DashboardScreen(
 
         // Active Temporary Passes List
         if (temporaryPasses.isNotEmpty()) {
-            val now = System.currentTimeMillis()
             val activePasses = temporaryPasses.filter { it.value > now }
             if (activePasses.isNotEmpty()) {
                 item {
@@ -243,6 +267,7 @@ fun DashboardScreen(
                             Spacer(modifier = Modifier.height(10.dp))
                             activePasses.forEach { (pkg, expiryTime) ->
                                 val remainingMins = ((expiryTime - now) / 60000L).coerceAtLeast(1)
+                                val friendlyName = onGetAppName(pkg)
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -252,15 +277,16 @@ fun DashboardScreen(
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = pkg,
+                                            text = friendlyName,
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = FontWeight.SemiBold,
                                             color = TextPrimary
                                         )
                                         Text(
-                                            text = "Expira em ~$remainingMins minuto(s)",
+                                            text = "$pkg • Expira em ~$remainingMins min",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = TextMuted
+                                            color = TextMuted,
+                                            fontSize = 11.sp
                                         )
                                     }
                                     OutlinedButton(

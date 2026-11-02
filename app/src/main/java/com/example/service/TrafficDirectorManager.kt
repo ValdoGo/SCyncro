@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Process
 import android.provider.Settings
 import android.text.TextUtils
+import android.view.inputmethod.InputMethodManager
 import com.example.data.FocusNetRepository
 import com.example.model.TrafficEventType
 import com.example.model.TrafficLogEntry
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 object TrafficDirectorManager {
 
@@ -34,11 +36,9 @@ object TrafficDirectorManager {
     private val _currentForegroundAppName = MutableStateFlow<String>("FocusNet")
     val currentForegroundAppName: StateFlow<String> = _currentForegroundAppName.asStateFlow()
 
-    private val _gracePackage = MutableStateFlow<String?>(null)
-    val gracePackage: StateFlow<String?> = _gracePackage.asStateFlow()
-
-    private val _graceRemainingSeconds = MutableStateFlow(0)
-    val graceRemainingSeconds: StateFlow<Int> = _graceRemainingSeconds.asStateFlow()
+    // Multi-app Grace Pass Map: Package -> ExpiryTimestamp
+    private val _activeGracePasses = MutableStateFlow<Map<String, Long>>(emptyMap())
+    val activeGracePasses: StateFlow<Map<String, Long>> = _activeGracePasses.asStateFlow()
 
     private val _isVpnActive = MutableStateFlow(false)
     val isVpnActive: StateFlow<Boolean> = _isVpnActive.asStateFlow()
@@ -57,13 +57,12 @@ object TrafficDirectorManager {
         "com.android.permissioncontroller",
         "com.google.android.permissioncontroller",
         "com.android.packageinstaller",
-        "com.google.android.packageinstaller",
-        "com.google.android.inputmethod.latin",
-        "com.samsung.android.honeyboard",
-        "com.touchtype.swiftkey"
+        "com.google.android.packageinstaller"
     )
 
     private var appContext: Context? = null
+    private var cachedEnabledImes: Set<String>? = null
+    private var lastImeCheckTime: Long = 0L
 
     fun registerVpnService(context: Context, onReconfigRequested: () -> Unit) {
         appContext = context.applicationContext
@@ -82,34 +81,48 @@ object TrafficDirectorManager {
         _isAccessibilityConnected.value = connected
     }
 
-    private fun isIgnoredPackage(packageName: String): Boolean {
-        if (IGNORED_PACKAGES.contains(packageName)) return true
-        if (packageName.contains(".inputmethod") ||
-            packageName.contains(".ime") ||
-            packageName.contains("keyboard", ignoreCase = true)
-        ) {
-            return true
+    private fun getEnabledImePackages(context: Context): Set<String> {
+        val now = System.currentTimeMillis()
+        val cached = cachedEnabledImes
+        if (cached != null && now - lastImeCheckTime < 30000L) {
+            return cached
         }
-        return false
+        return try {
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            val imes = imm?.enabledInputMethodList?.map { it.packageName }?.toSet() ?: emptySet()
+            cachedEnabledImes = imes
+            lastImeCheckTime = now
+            imes
+        } catch (e: Exception) {
+            emptySet()
+        }
+    }
+
+    private fun isIgnoredPackage(packageName: String, context: Context): Boolean {
+        if (IGNORED_PACKAGES.contains(packageName)) return true
+        val imes = getEnabledImePackages(context)
+        return imes.contains(packageName)
     }
 
     /**
      * Called by FocusAccessibilityService on window changes.
-     * Applies ignored package filtering, 300ms debounce, and optional UsageStats confirmation.
+     * Applies keyboard and system package filtering, 300ms debounce, and background UsageStats confirmation.
      */
     fun onForegroundAppChanged(rawPackageName: String, context: Context) {
-        if (isIgnoredPackage(rawPackageName)) return
+        if (isIgnoredPackage(rawPackageName, context)) return
 
         debounceJob?.cancel()
-        debounceJob = managerScope.launch {
+        debounceJob = managerScope.launch(Dispatchers.Default) {
             // 300 ms debounce to ignore transient popups or fast gesture swipes
             delay(300)
 
-            // Confirm with UsageStatsManager if permission is granted
+            // Confirm with UsageStatsManager on background thread
             val confirmedPackage = getConfirmedForegroundApp(rawPackageName, context)
-            if (isIgnoredPackage(confirmedPackage)) return@launch
+            if (isIgnoredPackage(confirmedPackage, context)) return@launch
 
-            applyForegroundSwitch(confirmedPackage, context)
+            withContext(Dispatchers.Main) {
+                applyForegroundSwitch(confirmedPackage, context)
+            }
         }
     }
 
@@ -125,11 +138,11 @@ object TrafficDirectorManager {
         _currentForegroundAppName.value = appName
         repo.incrementSwitchesCount()
 
-        // If the user re-opened the app currently in grace period, cancel the grace countdown
-        if (newPackage == _gracePackage.value) {
-            graceJob?.cancel()
-            _gracePackage.value = null
-            _graceRemainingSeconds.value = 0
+        // If user returned to an app in grace period, remove it from grace as it's now foreground
+        if (_activeGracePasses.value.containsKey(newPackage)) {
+            val updated = _activeGracePasses.value.toMutableMap()
+            updated.remove(newPackage)
+            _activeGracePasses.value = updated
         }
 
         // Handle grace period for the app leaving the screen
@@ -165,9 +178,11 @@ object TrafficDirectorManager {
     }
 
     private fun startGracePeriod(pkg: String, appName: String, seconds: Int, context: Context) {
-        graceJob?.cancel()
-        _gracePackage.value = pkg
-        _graceRemainingSeconds.value = seconds
+        val now = System.currentTimeMillis()
+        val expiry = now + (seconds * 1000L)
+        val current = _activeGracePasses.value.toMutableMap()
+        current[pkg] = expiry
+        _activeGracePasses.value = current
 
         val repo = FocusNetRepository.getInstance(context)
         repo.addLog(
@@ -175,7 +190,7 @@ object TrafficDirectorManager {
                 packageName = pkg,
                 appName = appName,
                 eventType = TrafficEventType.EXEMPTION_ALLOWED,
-                detail = "Período de graça iniciado ($seconds s) para concluir uploads/downloads."
+                detail = "Período de graça iniciado ($seconds s) para $appName para concluir uploads/downloads."
             )
         )
 
@@ -184,23 +199,35 @@ object TrafficDirectorManager {
             vpnReconfigListener?.invoke()
         }
 
+        ensureGraceTickerRunning(context)
+    }
+
+    private fun ensureGraceTickerRunning(context: Context) {
+        if (graceJob?.isActive == true) return
+
         graceJob = managerScope.launch {
-            for (remaining in seconds downTo 1) {
-                _graceRemainingSeconds.value = remaining
+            while (_activeGracePasses.value.isNotEmpty()) {
                 delay(1000)
-            }
+                val now = System.currentTimeMillis()
+                val current = _activeGracePasses.value
+                val expired = current.filterValues { it <= now }
+                if (expired.isNotEmpty()) {
+                    val remaining = current.filterValues { it > now }
+                    _activeGracePasses.value = remaining
 
-            // Grace period ended
-            _gracePackage.value = null
-            _graceRemainingSeconds.value = 0
+                    val repo = FocusNetRepository.getInstance(context)
+                    expired.forEach { (pkg, _) ->
+                        val appName = repo.getAppName(pkg)
+                        repo.recordBlockedAttempt(
+                            packageName = pkg,
+                            reason = "Período de graça expirado para $appName. Conexão em 2º plano cortada pelo firewall."
+                        )
+                    }
 
-            repo.recordBlockedAttempt(
-                packageName = pkg,
-                reason = "Período de graça expirado ($seconds s). Conexão em 2º plano cortada pelo firewall."
-            )
-
-            if (repo.settings.value.isProtectionEnabled) {
-                vpnReconfigListener?.invoke()
+                    if (repo.settings.value.isProtectionEnabled) {
+                        vpnReconfigListener?.invoke()
+                    }
+                }
             }
         }
     }
@@ -242,7 +269,7 @@ object TrafficDirectorManager {
                     }
                 }
 
-                if (latestActivityPkg != null && !isIgnoredPackage(latestActivityPkg)) {
+                if (latestActivityPkg != null && !isIgnoredPackage(latestActivityPkg, context)) {
                     return latestActivityPkg
                 }
             }

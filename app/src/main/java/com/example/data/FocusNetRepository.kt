@@ -87,8 +87,30 @@ class FocusNetRepository(private val context: Context) {
         )
     }
 
-    private val _temporaryPasses = MutableStateFlow<Map<String, Long>>(emptyMap())
+    private val _temporaryPasses = MutableStateFlow<Map<String, Long>>(loadTemporaryPasses())
     val temporaryPasses: StateFlow<Map<String, Long>> = _temporaryPasses.asStateFlow()
+
+    private fun loadTemporaryPasses(): Map<String, Long> {
+        val raw = prefs.getString(KEY_TEMPORARY_PASSES, null) ?: return emptyMap()
+        val now = System.currentTimeMillis()
+        val result = mutableMapOf<String, Long>()
+        raw.split(",").forEach { item ->
+            val parts = item.split(":")
+            if (parts.size == 2) {
+                val pkg = parts[0].trim()
+                val timestamp = parts[1].trim().toLongOrNull() ?: 0L
+                if (pkg.isNotEmpty() && timestamp > now) {
+                    result[pkg] = timestamp
+                }
+            }
+        }
+        return result
+    }
+
+    private fun saveTemporaryPasses(passes: Map<String, Long>) {
+        val raw = passes.entries.joinToString(",") { "${it.key}:${it.value}" }
+        prefs.edit().putString(KEY_TEMPORARY_PASSES, raw).apply()
+    }
 
     private fun loadSettings(): TrafficSettings {
         return TrafficSettings(
@@ -104,10 +126,9 @@ class FocusNetRepository(private val context: Context) {
 
     private fun loadWhitelistedPackages(): Set<String> {
         val saved = prefs.getStringSet(KEY_WHITELIST, null)
-        if (saved != null) return saved
+        val savedVersion = prefs.getInt(KEY_WHITELIST_VERSION, 1)
 
-        // Smart default whitelist: Essential system services, phone calls, SMS & push notifications
-        val defaults = mutableSetOf(
+        val defaultWhitelist = setOf(
             "com.google.android.gms",            // Google Play Services (FCM Push Notifications)
             "com.android.vending",               // Google Play Store
             "com.google.android.dialer",         // Telefone / Chamadas
@@ -117,8 +138,22 @@ class FocusNetRepository(private val context: Context) {
             "com.android.mms",                   // Mensagens MMS
             "com.android.providers.telephony"    // Telefonia móvel
         )
-        prefs.edit().putStringSet(KEY_WHITELIST, defaults).apply()
-        return defaults
+
+        val finalSet = if (saved == null) {
+            defaultWhitelist
+        } else if (savedVersion < CURRENT_WHITELIST_VERSION) {
+            // Merge smart defaults for existing users so dialers, sms and push are not blocked
+            saved + defaultWhitelist
+        } else {
+            saved
+        }
+
+        prefs.edit()
+            .putStringSet(KEY_WHITELIST, finalSet)
+            .putInt(KEY_WHITELIST_VERSION, CURRENT_WHITELIST_VERSION)
+            .apply()
+
+        return finalSet
     }
 
     fun updateProtection(enabled: Boolean) {
@@ -157,6 +192,8 @@ class FocusNetRepository(private val context: Context) {
         val current = _temporaryPasses.value.toMutableMap()
         current[packageName] = expiry
         _temporaryPasses.value = current
+        saveTemporaryPasses(current)
+
         val appName = getAppName(packageName)
         addLog(
             TrafficLogEntry(
@@ -172,13 +209,15 @@ class FocusNetRepository(private val context: Context) {
         val current = _temporaryPasses.value.toMutableMap()
         if (current.remove(packageName) != null) {
             _temporaryPasses.value = current
+            saveTemporaryPasses(current)
+
             val appName = getAppName(packageName)
             addLog(
                 TrafficLogEntry(
                     packageName = packageName,
                     appName = appName,
                     eventType = TrafficEventType.BACKGROUND_BLOCKED,
-                    detail = "Passe temporário revogado/expirado para $appName."
+                    detail = "Passe temporário revogado para $appName."
                 )
             )
         }
@@ -187,9 +226,23 @@ class FocusNetRepository(private val context: Context) {
     fun cleanExpiredTemporaryPasses(): Boolean {
         val now = System.currentTimeMillis()
         val current = _temporaryPasses.value
-        val valid = current.filterValues { it > now }
-        if (valid.size != current.size) {
+        val expired = current.filterValues { it <= now }
+        if (expired.isNotEmpty()) {
+            val valid = current.filterValues { it > now }
             _temporaryPasses.value = valid
+            saveTemporaryPasses(valid)
+
+            expired.forEach { (pkg, _) ->
+                val appName = getAppName(pkg)
+                addLog(
+                    TrafficLogEntry(
+                        packageName = pkg,
+                        appName = appName,
+                        eventType = TrafficEventType.BACKGROUND_BLOCKED,
+                        detail = "Passe temporário de $appName expirou. Acesso em segundo plano cortado."
+                    )
+                )
+            }
             return true
         }
         return false
@@ -377,6 +430,9 @@ class FocusNetRepository(private val context: Context) {
         private const val KEY_SWITCHES_COUNT = "key_switches_count"
         private const val KEY_AUTO_ACTIVATE = "key_auto_activate"
         private const val KEY_GRACE_PERIOD = "key_grace_period"
+        private const val KEY_TEMPORARY_PASSES = "key_temporary_passes"
+        private const val KEY_WHITELIST_VERSION = "key_whitelist_version"
+        private const val CURRENT_WHITELIST_VERSION = 2
 
         @Volatile
         private var INSTANCE: FocusNetRepository? = null
