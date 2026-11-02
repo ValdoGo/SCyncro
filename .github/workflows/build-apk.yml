@@ -19,8 +19,10 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Android SDK (aceita licencas)
-        uses: android-actions/setup-android@v3
+      # O runner ja traz o Android SDK instalado; so e preciso aceitar as licencas
+      # para o Gradle poder descarregar a plataforma que faltar.
+      - name: Aceitar licencas do Android SDK
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
       # O repositorio nao tem gradlew nem gradle-wrapper.jar,
       # por isso instalamos a versao do Gradle indicada em gradle-wrapper.properties.
