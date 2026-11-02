@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">FocusNet</string>
+    <string name="accessibility_service_label">FocusNet - Detector de App em Primeiro Plano</string>
+    <string name="accessibility_service_description">Detecta instantaneamente quando você abre ou alterna de aplicativo na tela para direcionar todo o tráfego de internet exclusivamente ao app ativo.</string>
+    <string name="vpn_service_label">FocusNet Firewall de Tráfego</string>
+    <string name="notification_channel_name">Serviço de Proteção FocusNet</string>
+    <string name="notification_channel_desc">Notificações em primeiro plano sobre o status do firewall e tráfego direcionado.</string>
+</resources>

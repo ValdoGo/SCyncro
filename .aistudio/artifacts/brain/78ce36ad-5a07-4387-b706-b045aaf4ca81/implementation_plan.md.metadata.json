@@ -1,0 +1,6 @@
+{
+  "summary":  "Plano de implementação para adicionar o Contador de Megabytes/Gigabytes economizados e Gráfico de Consumo comparativo ao FocusNet. Inclui métricas em tempo real de dados poupados por aplicativos em segundo plano, histórico visual por período e estimativa da franquia de dados preservada.",
+  "updatedAt":  "2026-11-02T03:51:19.191416548Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

@@ -1,0 +1,6 @@
+{
+  "name": "FocusNet",
+  "description": "Direciona a conexão de internet exclusivamente para o aplicativo aberto em primeiro plano na tela, bloqueando apps em segundo plano para economizar dados.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
