@@ -1,0 +1,54 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Android SDK (aceita licencas)
+        uses: android-actions/setup-android@v3
+
+      # O repositorio nao tem gradlew nem gradle-wrapper.jar,
+      # por isso instalamos a versao do Gradle indicada em gradle-wrapper.properties.
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 9.3.1
+
+      # debug.keystore esta no .gitignore, mas o build.gradle.kts exige-o.
+      - name: Criar debug.keystore
+        run: |
+          keytool -genkeypair -v \
+            -keystore debug.keystore \
+            -storepass android -alias androiddebugkey -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Compilar APK debug
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Guardar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: FocusNet-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+
+      # Opcional: corre os testes sem impedir o APK de ser guardado.
+      - name: Testes unitarios
+        continue-on-error: true
+        run: gradle testDebugUnitTest --no-daemon
