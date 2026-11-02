@@ -33,6 +33,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val currentForegroundPackage: StateFlow<String?> = TrafficDirectorManager.currentForegroundPackage
     val currentForegroundAppName: StateFlow<String> = TrafficDirectorManager.currentForegroundAppName
+    val gracePackage: StateFlow<String?> = TrafficDirectorManager.gracePackage
+    val graceRemainingSeconds: StateFlow<Int> = TrafficDirectorManager.graceRemainingSeconds
+    val temporaryPasses: StateFlow<Map<String, Long>> = repository.temporaryPasses
     val isVpnActive: StateFlow<Boolean> = TrafficDirectorManager.isVpnActive
     val isAccessibilityConnected: StateFlow<Boolean> = TrafficDirectorManager.isAccessibilityConnected
 
@@ -123,6 +126,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleAutoActivate(enable: Boolean) {
         repository.updateAutoActivate(enable)
+    }
+
+    fun updateGracePeriodSeconds(seconds: Int) {
+        repository.updateGracePeriodSeconds(seconds)
+    }
+
+    fun grantTemporaryPass(packageName: String, minutes: Int = 5) {
+        TrafficDirectorManager.grantTemporaryPass(packageName, minutes, getApplication())
+    }
+
+    fun revokeTemporaryPass(packageName: String) {
+        TrafficDirectorManager.revokeTemporaryPass(packageName, getApplication())
+    }
+
+    fun getAppName(packageName: String): String {
+        return repository.getAppName(packageName)
     }
 
     fun simulateAppSwitch(packageName: String) {

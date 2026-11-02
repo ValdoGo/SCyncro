@@ -63,6 +63,11 @@ import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 
+import androidx.compose.material.icons.filled.HourglassTop
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.CellTower
 import androidx.compose.material.icons.filled.SignalWifiOff
@@ -75,6 +80,9 @@ fun DashboardScreen(
     currentAppName: String,
     currentPackageName: String?,
     connectionType: com.example.service.ConnectionType = com.example.service.ConnectionType.WIFI,
+    gracePackage: String? = null,
+    graceRemainingSeconds: Int = 0,
+    temporaryPasses: Map<String, Long> = emptyMap(),
     isAccessibilityEnabled: Boolean,
     isVpnPrepared: Boolean,
     blockedCount: Int,
@@ -83,6 +91,8 @@ fun DashboardScreen(
     onToggleAutoActivate: (Boolean) -> Unit,
     onToggleMobileFilter: (Boolean) -> Unit,
     onToggleWifiFilter: (Boolean) -> Unit,
+    onUpdateGracePeriodSeconds: (Int) -> Unit = {},
+    onRevokeTemporaryPass: (String) -> Unit = {},
     onRequestVpnPermission: () -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
     onSimulateAppSwitch: (String) -> Unit,
@@ -117,6 +127,162 @@ fun DashboardScreen(
                 currentPackageName = currentPackageName,
                 isProtectionActive = settings.isProtectionEnabled
             )
+        }
+
+        // Active Grace Period Countdown Banner
+        if (gracePackage != null && graceRemainingSeconds > 0) {
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("grace_period_active_card"),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF2E2211)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, AmberAlert)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .background(AmberAlert.copy(alpha = 0.2f), CircleShape)
+                                .border(1.dp, AmberAlert.copy(alpha = 0.7f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.HourglassTop,
+                                contentDescription = null,
+                                tint = AmberAlert,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Carência Ativa: ${graceRemainingSeconds}s",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AmberAlert
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .background(AmberAlert, RoundedCornerShape(12.dp))
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "${graceRemainingSeconds}s",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.Black
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "App anterior ($gracePackage) tem mais $graceRemainingSeconds segundos de internet para concluir envios/downloads.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Active Temporary Passes List
+        if (temporaryPasses.isNotEmpty()) {
+            val now = System.currentTimeMillis()
+            val activePasses = temporaryPasses.filter { it.value > now }
+            if (activePasses.isNotEmpty()) {
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("temporary_passes_card"),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF142436)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.5f))
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.Timer,
+                                        contentDescription = null,
+                                        tint = ElectricCyan,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Passes Temporários Ativos",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = ElectricCyan
+                                    )
+                                }
+                                Text(
+                                    text = "${activePasses.size} liberado(s)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextMuted
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            activePasses.forEach { (pkg, expiryTime) ->
+                                val remainingMins = ((expiryTime - now) / 60000L).coerceAtLeast(1)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = pkg,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = TextPrimary
+                                        )
+                                        Text(
+                                            text = "Expira em ~$remainingMins minuto(s)",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = TextMuted
+                                        )
+                                    }
+                                    OutlinedButton(
+                                        onClick = { onRevokeTemporaryPass(pkg) },
+                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                            horizontal = 10.dp,
+                                            vertical = 4.dp
+                                        ),
+                                        modifier = Modifier.testTag("revoke_pass_$pkg")
+                                    ) {
+                                        Text(
+                                            text = "Revogar",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = CrimsonBlocked
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Auto-Activation on Internet Connect Card
@@ -238,6 +404,101 @@ fun DashboardScreen(
                                 color = NeonEmerald,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 10.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Grace Period Configuration Card
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("grace_period_settings_card"),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF131D2E)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, SlateCardBorder)
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .background(Color(0xFF261D10), CircleShape)
+                                    .border(1.dp, AmberAlert.copy(alpha = 0.6f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.HourglassTop,
+                                    contentDescription = null,
+                                    tint = AmberAlert,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Carência ao Trocar de App",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary
+                                )
+                                Text(
+                                    text = "Tempo extra para envios e downloads",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextMuted,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Ao sair de um aplicativo (ex: enviar áudio no WhatsApp ou foto no Instagram), ele continua com internet pelo tempo selecionado para concluir o tráfego antes de ser isolado.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary,
+                        lineHeight = 20.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            0 to "0s (Off)",
+                            10 to "10s",
+                            20 to "20s (Padrão)",
+                            30 to "30s"
+                        ).forEach { (seconds, label) ->
+                            val isSelected = settings.gracePeriodSeconds == seconds
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { onUpdateGracePeriodSeconds(seconds) },
+                                label = {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                modifier = Modifier.weight(1f).testTag("grace_chip_$seconds"),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = AmberAlert,
+                                    selectedLabelColor = Color.Black,
+                                    containerColor = Color(0xFF1E293B),
+                                    labelColor = TextPrimary
+                                )
                             )
                         }
                     }

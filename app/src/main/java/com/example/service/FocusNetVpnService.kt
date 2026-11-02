@@ -49,7 +49,7 @@ class FocusNetVpnService : VpnService() {
             }
             ACTION_START -> {
                 startForegroundWithNotification()
-                TrafficDirectorManager.registerVpnService {
+                TrafficDirectorManager.registerVpnService(applicationContext) {
                     reconfigureTunnel()
                 }
                 reconfigureTunnel()
@@ -135,62 +135,75 @@ class FocusNetVpnService : VpnService() {
         val activePkg = TrafficDirectorManager.currentForegroundPackage.value ?: packageName
         val activeAppName = TrafficDirectorManager.currentForegroundAppName.value
         val whitelist = repo.whitelistedPackages.value
+        val gracePkg = TrafficDirectorManager.gracePackage.value
+        val now = System.currentTimeMillis()
+        val tempPasses = repo.temporaryPasses.value.entries.filter { it.value > now }.map { it.key }
 
         try {
             val builder = Builder()
                 .setSession("FocusNet Escudo Ativo")
+                // IPv4 full tunnel
                 .addAddress("10.120.0.1", 32)
                 .addRoute("0.0.0.0", 0)
                 .addDnsServer("8.8.8.8")
+                // IPv6 full tunnel (Prevents IPv6 leak)
+                .addAddress("fd00:1:fd00:1::1", 128)
+                .addRoute("::", 0)
+                .addDnsServer("2001:4860:4860::8888")
                 .setMtu(1500)
 
-            // Direct internet access granted to foreground app:
-            try {
-                builder.addDisallowedApplication(activePkg)
-            } catch (e: PackageManager.NameNotFoundException) {
-                Log.w(TAG, "Active package not found: $activePkg")
+            val allowedDirectPackages = mutableSetOf<String>()
+            allowedDirectPackages.add(activePkg)
+            allowedDirectPackages.addAll(whitelist)
+            if (gracePkg != null) {
+                allowedDirectPackages.add(gracePkg)
             }
+            allowedDirectPackages.addAll(tempPasses)
+            allowedDirectPackages.add(packageName) // FocusNet self
 
-            // Direct internet access granted to whitelisted background apps:
-            for (pkg in whitelist) {
-                if (pkg != activePkg) {
-                    try {
-                        builder.addDisallowedApplication(pkg)
-                    } catch (e: Exception) {
-                        // ignore uninstalled
-                    }
-                }
-            }
-
-            // Direct internet access for FocusNet itself
-            if (activePkg != packageName && !whitelist.contains(packageName)) {
+            for (pkg in allowedDirectPackages) {
                 try {
-                    builder.addDisallowedApplication(packageName)
+                    builder.addDisallowedApplication(pkg)
                 } catch (e: Exception) {
-                    // ignore
+                    // Package not installed or system virtual
                 }
             }
 
-            // Close previous interface safely
-            closeInterface()
+            // Zero-Gap Transition: Create the new interface first before closing the old one
+            val oldInterface = vpnInterface
+            val newInterface = builder.establish()
 
-            vpnInterface = builder.establish()
+            if (newInterface != null) {
+                vpnInterface = newInterface
+                startDrainingPackets()
 
-            updateNotificationText("Liberado para $activeAppName. Background bloqueado.")
+                try {
+                    oldInterface?.close()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed closing old interface", e)
+                }
+            } else {
+                Log.e(TAG, "Builder.establish() returned null; keeping current interface")
+                return
+            }
+
+            val statusDetail = when {
+                gracePkg != null -> "Liberado para $activeAppName (Carência ativa para ${repo.getAppName(gracePkg)})."
+                tempPasses.isNotEmpty() -> "Liberado para $activeAppName (+${tempPasses.size} passes temporários)."
+                else -> "Liberado para $activeAppName. Background bloqueado (IPv4 + IPv6)."
+            }
+            updateNotificationText(statusDetail)
 
             repo.addLog(
                 TrafficLogEntry(
                     packageName = activePkg,
                     appName = activeAppName,
                     eventType = TrafficEventType.FOREGROUND_GRANTED,
-                    detail = "Firewall reconfigurado: $activeAppName está com acesso liberado. Apps em 2º plano bloqueados."
+                    detail = "Firewall reconfigurado: $activeAppName está conectado diretamente. Demais apps silenciados em IPv4 e IPv6."
                 )
             )
-
-            startDrainingPackets()
-
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to establish VPN interface", e)
+            Log.e(TAG, "Erro ao reconfigurar interface do firewall", e)
             repo.addLog(
                 TrafficLogEntry(
                     packageName = activePkg,

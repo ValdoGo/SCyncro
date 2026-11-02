@@ -13,4 +13,24 @@ class ExampleUnitTest {
   fun addition_isCorrect() {
     assertEquals(4, 2 + 2)
   }
+
+  @Test
+  fun default_traffic_settings_has_expected_values() {
+    val settings = com.example.model.TrafficSettings()
+    assertFalse(settings.isProtectionEnabled)
+    assertTrue(settings.autoActivateOnConnect)
+    assertEquals(20, settings.gracePeriodSeconds)
+    assertTrue(settings.filterMobileData)
+    assertTrue(settings.filterWifi)
+  }
+
+  @Test
+  fun traffic_event_types_exist() {
+    val granted = com.example.model.TrafficEventType.FOREGROUND_GRANTED
+    val blocked = com.example.model.TrafficEventType.BACKGROUND_BLOCKED
+    val exempt = com.example.model.TrafficEventType.EXEMPTION_ALLOWED
+    assertNotNull(granted)
+    assertNotNull(blocked)
+    assertNotNull(exempt)
+  }
 }

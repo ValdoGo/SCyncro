@@ -109,6 +109,9 @@ fun FocusNetApp(
     val connectionType by viewModel.connectionType.collectAsState()
     val currentAppName by viewModel.currentForegroundAppName.collectAsState()
     val currentPackageName by viewModel.currentForegroundPackage.collectAsState()
+    val gracePackage by viewModel.gracePackage.collectAsState()
+    val graceRemainingSeconds by viewModel.graceRemainingSeconds.collectAsState()
+    val temporaryPasses by viewModel.temporaryPasses.collectAsState()
     val isAccessibilityEnabled by viewModel.isAccessibilityPermissionGranted.collectAsState()
     val isVpnPrepared by viewModel.isVpnPermissionGranted.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
@@ -179,6 +182,9 @@ fun FocusNetApp(
                     currentAppName = currentAppName,
                     currentPackageName = currentPackageName,
                     connectionType = connectionType,
+                    gracePackage = gracePackage,
+                    graceRemainingSeconds = graceRemainingSeconds,
+                    temporaryPasses = temporaryPasses,
                     isAccessibilityEnabled = isAccessibilityEnabled,
                     isVpnPrepared = isVpnPrepared,
                     blockedCount = blockedCount,
@@ -198,6 +204,8 @@ fun FocusNetApp(
                     onToggleAutoActivate = { viewModel.toggleAutoActivate(it) },
                     onToggleMobileFilter = { viewModel.toggleMobileFilter(it) },
                     onToggleWifiFilter = { viewModel.toggleWifiFilter(it) },
+                    onUpdateGracePeriodSeconds = { viewModel.updateGracePeriodSeconds(it) },
+                    onRevokeTemporaryPass = { viewModel.revokeTemporaryPass(it) },
                     onRequestVpnPermission = requestVpn,
                     onOpenAccessibilitySettings = openAccessibility,
                     onSimulateAppSwitch = { viewModel.simulateAppSwitch(it) },
@@ -207,8 +215,11 @@ fun FocusNetApp(
                 1 -> WhitelistScreen(
                     apps = apps,
                     searchQuery = searchQuery,
+                    temporaryPasses = temporaryPasses,
                     onSearchQueryChange = { viewModel.setSearchQuery(it) },
-                    onToggleWhitelist = { pkg, allowed -> viewModel.toggleAppWhitelist(pkg, allowed) }
+                    onToggleWhitelist = { pkg, allowed -> viewModel.toggleAppWhitelist(pkg, allowed) },
+                    onGrantTemporaryPass = { pkg, mins -> viewModel.grantTemporaryPass(pkg, mins) },
+                    onRevokeTemporaryPass = { pkg -> viewModel.revokeTemporaryPass(pkg) }
                 )
                 2 -> LogsScreen(
                     logs = logs,

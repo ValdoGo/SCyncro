@@ -87,10 +87,14 @@ class FocusNetRepository(private val context: Context) {
         )
     }
 
+    private val _temporaryPasses = MutableStateFlow<Map<String, Long>>(emptyMap())
+    val temporaryPasses: StateFlow<Map<String, Long>> = _temporaryPasses.asStateFlow()
+
     private fun loadSettings(): TrafficSettings {
         return TrafficSettings(
             isProtectionEnabled = prefs.getBoolean(KEY_PROTECTION_ENABLED, false),
             autoActivateOnConnect = prefs.getBoolean(KEY_AUTO_ACTIVATE, true),
+            gracePeriodSeconds = prefs.getInt(KEY_GRACE_PERIOD, 20),
             filterMobileData = prefs.getBoolean(KEY_FILTER_MOBILE, true),
             filterWifi = prefs.getBoolean(KEY_FILTER_WIFI, true),
             blockSystemAppsByDefault = prefs.getBoolean(KEY_BLOCK_SYSTEM, false),
@@ -102,10 +106,16 @@ class FocusNetRepository(private val context: Context) {
         val saved = prefs.getStringSet(KEY_WHITELIST, null)
         if (saved != null) return saved
 
-        // Default useful exceptions so user isn't locked out of critical system services
+        // Smart default whitelist: Essential system services, phone calls, SMS & push notifications
         val defaults = mutableSetOf(
-            "com.android.vending", // Google Play Store
-            "com.google.android.gms" // Play Services for push notifications
+            "com.google.android.gms",            // Google Play Services (FCM Push Notifications)
+            "com.android.vending",               // Google Play Store
+            "com.google.android.dialer",         // Telefone / Chamadas
+            "com.android.dialer",                // Telefone nativo
+            "com.samsung.android.dialer",        // Telefone Samsung
+            "com.google.android.apps.messaging", // Mensagens / SMS
+            "com.android.mms",                   // Mensagens MMS
+            "com.android.providers.telephony"    // Telefonia móvel
         )
         prefs.edit().putStringSet(KEY_WHITELIST, defaults).apply()
         return defaults
@@ -135,6 +145,54 @@ class FocusNetRepository(private val context: Context) {
                 detail = if (enabled) "Ativação automática por conexão ligada." else "Ativação automática desativada."
             )
         )
+    }
+
+    fun updateGracePeriodSeconds(seconds: Int) {
+        prefs.edit().putInt(KEY_GRACE_PERIOD, seconds).apply()
+        _settings.value = _settings.value.copy(gracePeriodSeconds = seconds)
+    }
+
+    fun grantTemporaryPass(packageName: String, minutes: Int = 5) {
+        val expiry = System.currentTimeMillis() + (minutes * 60 * 1000L)
+        val current = _temporaryPasses.value.toMutableMap()
+        current[packageName] = expiry
+        _temporaryPasses.value = current
+        val appName = getAppName(packageName)
+        addLog(
+            TrafficLogEntry(
+                packageName = packageName,
+                appName = appName,
+                eventType = TrafficEventType.EXEMPTION_ALLOWED,
+                detail = "Passe temporário concedido para $appName por $minutes minutos."
+            )
+        )
+    }
+
+    fun revokeTemporaryPass(packageName: String) {
+        val current = _temporaryPasses.value.toMutableMap()
+        if (current.remove(packageName) != null) {
+            _temporaryPasses.value = current
+            val appName = getAppName(packageName)
+            addLog(
+                TrafficLogEntry(
+                    packageName = packageName,
+                    appName = appName,
+                    eventType = TrafficEventType.BACKGROUND_BLOCKED,
+                    detail = "Passe temporário revogado/expirado para $appName."
+                )
+            )
+        }
+    }
+
+    fun cleanExpiredTemporaryPasses(): Boolean {
+        val now = System.currentTimeMillis()
+        val current = _temporaryPasses.value
+        val valid = current.filterValues { it > now }
+        if (valid.size != current.size) {
+            _temporaryPasses.value = valid
+            return true
+        }
+        return false
     }
 
     fun updateFilterMobile(enabled: Boolean) {
@@ -318,6 +376,7 @@ class FocusNetRepository(private val context: Context) {
         private const val KEY_BLOCKED_COUNT = "key_blocked_count"
         private const val KEY_SWITCHES_COUNT = "key_switches_count"
         private const val KEY_AUTO_ACTIVATE = "key_auto_activate"
+        private const val KEY_GRACE_PERIOD = "key_grace_period"
 
         @Volatile
         private var INSTANCE: FocusNetRepository? = null

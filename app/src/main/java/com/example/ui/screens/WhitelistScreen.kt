@@ -51,14 +51,28 @@ import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
+import com.example.ui.theme.AmberAlert
+import com.example.ui.theme.CrimsonBlocked
+
 @Composable
 fun WhitelistScreen(
     apps: List<AppInfo>,
     searchQuery: String,
+    temporaryPasses: Map<String, Long> = emptyMap(),
     onSearchQueryChange: (String) -> Unit,
     onToggleWhitelist: (String, Boolean) -> Unit,
+    onGrantTemporaryPass: (String, Int) -> Unit = { _, _ -> },
+    onRevokeTemporaryPass: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val now = System.currentTimeMillis()
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -104,9 +118,45 @@ fun WhitelistScreen(
             )
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
-        // Info Banner
+        // Smart System Default Advice Banner
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF0F261C), RoundedCornerShape(12.dp))
+                .border(1.dp, NeonEmerald.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                .padding(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.Top) {
+                Icon(
+                    imageVector = Icons.Default.Shield,
+                    contentDescription = null,
+                    tint = NeonEmerald,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "Lista Branca Inteligente de Sistema",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = NeonEmerald
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Google Play Services, Telefone e SMS vêm liberados por padrão para não perder notificações push globais nem chamadas telefônicas.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary,
+                        lineHeight = 16.sp
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Suggestion for WhatsApp & VoIP calling apps
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -114,24 +164,33 @@ fun WhitelistScreen(
                 .border(1.dp, ElectricCyan.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
                 .padding(12.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.Top) {
                 Icon(
-                    imageVector = Icons.Default.Shield,
+                    imageVector = Icons.Default.Call,
                     contentDescription = null,
                     tint = ElectricCyan,
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = "Apps marcados nesta lista continuam com internet mesmo quando você minimiza ou troca de tela.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary,
-                    lineHeight = 18.sp
-                )
+                Column {
+                    Text(
+                        text = "Sugestão para Chamadas e Mensagens",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = ElectricCyan
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Se quiser receber ligações do WhatsApp ou Telegram mesmo com outro app aberto, ative o botão de 2º plano ou use o Passe Temporário de 5 min.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary,
+                        lineHeight = 16.sp
+                    )
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         // Apps List
         if (apps.isEmpty()) {
@@ -164,9 +223,19 @@ fun WhitelistScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(apps, key = { it.packageName }) { app ->
+                    val expiry = temporaryPasses[app.packageName]
+                    val hasTempPass = expiry != null && expiry > now
+                    val remainingMins = if (hasTempPass && expiry != null) {
+                        ((expiry - now) / 60000L).coerceAtLeast(1)
+                    } else 0L
+
                     AppWhitelistItem(
                         app = app,
-                        onToggle = { isAllowed -> onToggleWhitelist(app.packageName, isAllowed) }
+                        hasTempPass = hasTempPass,
+                        tempRemainingMinutes = remainingMins,
+                        onToggle = { isAllowed -> onToggleWhitelist(app.packageName, isAllowed) },
+                        onGrantTempPass = { onGrantTemporaryPass(app.packageName, 5) },
+                        onRevokeTempPass = { onRevokeTemporaryPass(app.packageName) }
                     )
                 }
                 item {
@@ -180,19 +249,33 @@ fun WhitelistScreen(
 @Composable
 private fun AppWhitelistItem(
     app: AppInfo,
-    onToggle: (Boolean) -> Unit
+    hasTempPass: Boolean,
+    tempRemainingMinutes: Long,
+    onToggle: (Boolean) -> Unit,
+    onGrantTempPass: () -> Unit,
+    onRevokeTempPass: () -> Unit
 ) {
+    val isHighlighted = app.isWhitelisted || hasTempPass
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("app_item_${app.packageName}"),
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (app.isWhitelisted) Color(0xFF162539) else Color(0xFF131D2E)
+            containerColor = when {
+                app.isWhitelisted -> Color(0xFF162539)
+                hasTempPass -> Color(0xFF261D12)
+                else -> Color(0xFF131D2E)
+            }
         ),
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
-            if (app.isWhitelisted) NeonEmerald.copy(alpha = 0.5f) else SlateCardBorder
+            when {
+                app.isWhitelisted -> NeonEmerald.copy(alpha = 0.5f)
+                hasTempPass -> AmberAlert.copy(alpha = 0.5f)
+                else -> SlateCardBorder
+            }
         )
     ) {
         Row(
@@ -238,6 +321,21 @@ private fun AppWhitelistItem(
                                     color = NeonEmerald
                                 )
                             }
+                        } else if (hasTempPass) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0xFF452A0A), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "PASSE (${tempRemainingMinutes}m)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AmberAlert
+                                )
+                            }
                         }
                     }
 
@@ -253,17 +351,67 @@ private fun AppWhitelistItem(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            Switch(
-                checked = app.isWhitelisted,
-                onCheckedChange = onToggle,
-                modifier = Modifier.testTag("switch_${app.packageName}"),
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.Black,
-                    checkedTrackColor = NeonEmerald,
-                    uncheckedThumbColor = Color(0xFF64748B),
-                    uncheckedTrackColor = Color(0xFF1E293B)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (!app.isWhitelisted) {
+                    if (hasTempPass) {
+                        OutlinedButton(
+                            onClick = onRevokeTempPass,
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                horizontal = 8.dp,
+                                vertical = 2.dp
+                            ),
+                            modifier = Modifier
+                                .height(32.dp)
+                                .testTag("revoke_temp_${app.packageName}")
+                        ) {
+                            Text(
+                                text = "Revogar",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = CrimsonBlocked,
+                                fontSize = 10.sp
+                            )
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = onGrantTempPass,
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                horizontal = 8.dp,
+                                vertical = 2.dp
+                            ),
+                            modifier = Modifier
+                                .height(32.dp)
+                                .testTag("btn_temp_pass_${app.packageName}")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Timer,
+                                contentDescription = null,
+                                tint = ElectricCyan,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "+5 min",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = ElectricCyan,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+
+                Switch(
+                    checked = app.isWhitelisted,
+                    onCheckedChange = onToggle,
+                    modifier = Modifier.testTag("switch_${app.packageName}"),
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.Black,
+                        checkedTrackColor = NeonEmerald,
+                        uncheckedThumbColor = Color(0xFF64748B),
+                        uncheckedTrackColor = Color(0xFF1E293B)
+                    )
                 )
-            )
+            }
         }
     }
 }
